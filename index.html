@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Bay Cities - Print Label</title>
+<script src="BrowserPrint-3.1.250.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; background: #181818; color: #fff; text-align: center; padding: 60px 20px; }
+  h1 { color: #E05A2B; font-size: 20px; }
+  .status { font-size: 16px; margin: 20px 0; }
+  .ok { color: #4BBFBF; }
+  .err { color: #E05A2B; }
+  button { background: #E05A2B; color: #fff; border: none; padding: 12px 24px; border-radius: 6px; font-size: 15px; cursor: pointer; margin-top: 16px; }
+  button:hover { opacity: 0.9; }
+</style>
+</head>
+<body>
+
+<h1>Bay Cities - Label Print</h1>
+<div id="status" class="status">Looking for printer...</div>
+<button id="retryBtn" style="display:none;" onclick="printLabel()">Print again</button>
+
+<script>
+function getParam(name) {
+  var params = new URLSearchParams(window.location.search);
+  return params.get(name) || "";
+}
+
+function buildZPL() {
+  var boxId = getParam("boxid");
+  var desc = getParam("desc").substring(0, 40);
+  var pm = getParam("pm");
+  var project = getParam("project");
+  var loc = getParam("loc");
+
+  return "^XA\n" +
+    "^CI28\n" +
+    "^PW812\n" +
+    "^LL1218\n" +
+    "^FO20,40^A0N,100,100^FD" + boxId + "^FS\n" +
+    "^FO20,170^GB760,4,4^FS\n" +
+    "^FO20,210^A0N,65,65^FB760,2,10,L,0^FD" + desc + "^FS\n" +
+    "^FO20,390^A0N,80,80^FD" + pm + "^FS\n" +
+    "^FO20,480^A0N,30,30^FDProject: " + project + "^FS\n" +
+    "^FO20,550^GB760,3,3^FS\n" +
+    "^FO20,590^A0N,26,26^FDLOCATION^FS\n" +
+    "^FO20,630^A0N,65,65^FD" + loc + "^FS\n" +
+    "^FO20,760^GB760,3,3^FS\n" +
+    "^FO20,800^A0N,26,26^FDNOTES^FS\n" +
+    "^XZ\n";
+}
+
+function setStatus(msg, cls) {
+  var el = document.getElementById("status");
+  el.textContent = msg;
+  el.className = "status " + (cls || "");
+}
+
+function printLabel() {
+  document.getElementById("retryBtn").style.display = "none";
+  setStatus("Looking for printer...");
+
+  if (typeof BrowserPrint === "undefined") {
+    setStatus("Browser Print not detected. Install it from zebra.com and reload this page.", "err");
+    document.getElementById("retryBtn").style.display = "inline-block";
+    return;
+  }
+
+  BrowserPrint.getDefaultDevice("printer", function (device) {
+    if (!device) {
+      setStatus("No default printer configured in Browser Print.", "err");
+      document.getElementById("retryBtn").style.display = "inline-block";
+      return;
+    }
+
+    var zpl = buildZPL();
+    device.send(zpl, function () {
+      setStatus("Label sent to " + device.name + ". You can close this tab.", "ok");
+    }, function (error) {
+      setStatus("Print failed: " + error, "err");
+      document.getElementById("retryBtn").style.display = "inline-block";
+    });
+  }, function (error) {
+    setStatus("Could not connect to Browser Print: " + error, "err");
+    document.getElementById("retryBtn").style.display = "inline-block";
+  });
+}
+
+window.onload = printLabel;
+</script>
+
+</body>
+</html>
