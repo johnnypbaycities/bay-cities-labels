@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Bay Cities - Bulk Label Print</title>
+<script src="BrowserPrint-3.1.250.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; background: #181818; color: #fff; padding: 32px 20px; max-width: 980px; margin: 0 auto; }
+  h1 { color: #E05A2B; font-size: 22px; margin: 0 0 6px; }
+  p.hint { color: #bbb; font-size: 14px; margin: 4px 0 16px; }
+  textarea { width: 100%; height: 110px; background: #222; color: #fff; border: 1px solid #444; border-radius: 6px; padding: 10px; font-size: 12px; box-sizing: border-box; }
+  button { background: #E05A2B; color: #fff; border: none; padding: 11px 20px; border-radius: 6px; font-size: 15px; cursor: pointer; margin: 10px 8px 0 0; }
+  button.secondary { background: #333; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0 10px; }
+  .bar label { font-size: 14px; color: #ddd; }
+  select { background: #222; color: #fff; border: 1px solid #444; border-radius: 6px; padding: 6px; }
+  .status { font-size: 15px; margin: 12px 0; min-height: 20px; }
+  .ok { color: #4BBFBF; } .err { color: #E05A2B; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #2c2c2c; vertical-align: top; }
+  th { color: #aaa; font-weight: normal; }
+  tr.empty td { color: #777; }
+  .wrap { max-height: 460px; overflow: auto; border: 1px solid #2c2c2c; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<h1>Bay Cities - Bulk Label Print (one-time)</h1>
+<p class="hint">1. In the desktop app, press the temporary "Copy all box labels" button. 2. Paste below and press Load. 3. Check the list, then Print selected.</p>
+
+<textarea id="data" placeholder="Paste the copied box data here"></textarea>
+<button onclick="loadData()">Load</button>
+
+<div class="bar">
+  <label>Pod
+    <select id="podFilter" onchange="render()">
+      <option value="">All</option><option>P1</option><option>P2</option><option>P3</option><option>P4</option><option value="__none">Not assigned</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="skipEmpty" checked onchange="render()"> Skip empty boxes</label>
+  <button class="secondary" onclick="setAll(true)">Select all shown</button>
+  <button class="secondary" onclick="setAll(false)">Select none</button>
+  <button id="printBtn" onclick="printSelected()" disabled>Print selected</button>
+</div>
+
+<div id="status" class="status"></div>
+<div class="wrap"><table id="tbl"></table></div>
+
+<script>
+var boxes = [];
+var printing = false;
+
+function clean(text) { return String(text == null ? "" : text).replace(/[\^~\\]/g, " ").trim(); }
+function shorten(text, maxChars) { return text.length > maxChars ? text.substring(0, maxChars - 1) + "…" : text; }
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+function setStatus(msg, cls) { var el = document.getElementById("status"); el.textContent = msg; el.className = "status " + (cls || ""); }
+
+function itemNames(raw) {
+  var seen = {}, names = [];
+  String(raw || "").split("|").forEach(function (n) {
+    var c = clean(n);
+    if (c && !seen[c.toLowerCase()]) { seen[c.toLowerCase()] = true; names.push(c); }
+  });
+  return names;
+}
+
+function loadData() {
+  try {
+    var parsed = JSON.parse(document.getElementById("data").value);
+    if (!Array.isArray(parsed)) throw new Error("not a list");
+    boxes = parsed.map(function (b) {
+      return { boxid: clean(b.boxid), pm: clean(b.pm), project: clean(b.project), loc: clean(b.loc), names: itemNames(b.items), selected: true };
+    }).filter(function (b) { return b.boxid; });
+    boxes.sort(function (a, b) { return a.boxid.localeCompare(b.boxid); });
+    render();
+    setStatus(boxes.length + " boxes loaded.", "ok");
+  } catch (e) {
+    setStatus("That doesn't look like the copied box data. Copy it again from the app and paste the whole thing.", "err");
+  }
+}
+
+function visible() {
+  var pod = document.getElementById("podFilter").value;
+  var skip = document.getElementById("skipEmpty").checked;
+  return boxes.filter(function (b) {
+    if (skip && b.names.length === 0) return false;
+    if (pod === "__none") return !/^P[1-4]/.test(b.loc);
+    if (pod) return b.loc.indexOf(pod) === 0;
+    return true;
+  });
+}
+
+function render() {
+  var rows = visible();
+  var html = "<tr><th></th><th>Box</th><th>PM</th><th>Project</th><th>Location</th><th>Items</th></tr>";
+  rows.forEach(function (b) {
+    var i = boxes.indexOf(b);
+    html += "<tr class='" + (b.names.length ? "" : "empty") + "'><td><input type='checkbox' " + (b.selected ? "checked" : "") +
+      " onchange='boxes[" + i + "].selected=this.checked;updateCount()'></td><td>" + esc(b.boxid) + "</td><td>" + esc(b.pm) +
+      "</td><td>" + esc(b.project) + "</td><td>" + esc(b.loc || "Not assigned") + "</td><td>" +
+      (b.names.length ? esc(b.names.join(", ")) : "(empty)") + "</td></tr>";
+  });
+  document.getElementById("tbl").innerHTML = html;
+  updateCount();
+}
+
+function setAll(on) { visible().forEach(function (b) { b.selected = on; }); render(); }
+
+function selectedBoxes() { return visible().filter(function (b) { return b.selected; }); }
+
+function updateCount() {
+  var n = selectedBoxes().length;
+  var btn = document.getElementById("printBtn");
+  btn.textContent = "Print selected (" + n + ")";
+  btn.disabled = n === 0 || printing;
+}
+
+// Same layout as the single-label page
+function itemsBlock(names) {
+  var top = 290, bottom = 760, width = 760, space = bottom - top;
+  var sizes = [60, 48, 40, 34, 28], size = sizes[sizes.length - 1];
+  for (var i = 0; i < sizes.length; i++) {
+    if (Math.floor(space / (sizes[i] + 10)) >= names.length) { size = sizes[i]; break; }
+  }
+  var maxLines = Math.floor(space / (size + 10));
+  var maxChars = Math.floor(width / (size * 0.55));
+  var lines = names.map(function (n) { return shorten("- " + n, maxChars); });
+  if (lines.length > maxLines) {
+    var extra = lines.length - (maxLines - 1);
+    lines = lines.slice(0, maxLines - 1);
+    lines.push("+ " + extra + " more");
+  }
+  if (lines.length === 0) lines = ["(no items listed)"];
+  return "^FO20," + top + "^A0N," + size + "," + size + "^FB" + width + "," + maxLines + ",10,L,0^FD" + lines.join("\\&") + "^FS\n";
+}
+
+function zplFor(b) {
+  var pm = shorten(b.pm || "No PM", 16);
+  var loc = (b.loc && b.loc !== "UNASSIGNED") ? b.loc : "Not assigned";
+  return "^XA\n^CI28\n^PW812\n^LL1218\n" +
+    "^FO20,30^A0N,100,100^FB772,1,0,L,0^FD" + pm + "^FS\n" +
+    "^FO20,145^A0N,55,55^FDProject " + (b.project || "none") + "^FS\n" +
+    "^FO20,220^GB760,4,4^FS\n" +
+    "^FO20,240^A0N,26,26^FDITEMS^FS\n" +
+    itemsBlock(b.names) +
+    "^FO20,775^GB760,3,3^FS\n" +
+    "^FO20,795^A0N,26,26^FDLOCATION^FS\n" +
+    "^FO20,830^A0N,70,70^FD" + loc + "^FS\n" +
+    "^FO20,935^A0N,34,34^FDBox " + b.boxid + "^FS\n" +
+    "^FO238,1000^BY3^BCN,170,N,N,N^FD" + b.boxid + "^FS\n" +
+    "^XZ\n";
+}
+
+// Sends labels in batches of 10 so the printer isn't flooded
+function printSelected() {
+  var list = selectedBoxes();
+  if (!list.length) return;
+  if (!confirm("Print " + list.length + " labels? Make sure the printer has enough labels loaded.")) return;
+  if (typeof BrowserPrint === "undefined") { setStatus("Browser Print not detected. Install it from zebra.com and reload this page.", "err"); return; }
+
+  printing = true; updateCount();
+  BrowserPrint.getDefaultDevice("printer", function (device) {
+    if (!device) { printing = false; updateCount(); setStatus("No default printer configured in Browser Print.", "err"); return; }
+    var i = 0, batch = 10;
+    function next() {
+      if (i >= list.length) {
+        printing = false; updateCount();
+        setStatus("Done. " + list.length + " labels sent to " + device.name + ".", "ok");
+        return;
+      }
+      var chunk = list.slice(i, i + batch);
+      setStatus("Printing " + (i + 1) + "–" + (i + chunk.length) + " of " + list.length + "…");
+      device.send(chunk.map(zplFor).join(""), function () {
+        chunk.forEach(function (b) { b.selected = false; });
+        i += batch;
+        setTimeout(next, 1500);
+      }, function (error) {
+        printing = false; render();
+        setStatus("Stopped at label " + (i + 1) + ": " + error + ". Labels already printed are unticked, so you can press Print selected to continue.", "err");
+      });
+    }
+    next();
+  }, function (error) {
+    printing = false; updateCount();
+    setStatus("Could not connect to Browser Print: " + error, "err");
+  });
+}
+</script>
+
+</body>
+</html>
