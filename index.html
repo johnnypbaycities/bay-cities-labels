@@ -26,27 +26,82 @@ function getParam(name) {
   return params.get(name) || "";
 }
 
+// ^ and ~ are ZPL command characters, so they can't appear in printed text
+function clean(text) {
+  return String(text || "").replace(/[\^~\\]/g, " ").trim();
+}
+
+function shorten(text, maxChars) {
+  return text.length > maxChars ? text.substring(0, maxChars - 1) + "…" : text;
+}
+
+// Product names come in as "Name 1|Name 2|Name 3". Falls back to the old desc field.
+function getItemNames() {
+  var raw = getParam("items");
+  if (!raw) raw = getParam("desc");
+  var seen = {};
+  var names = [];
+  raw.split("|").forEach(function (n) {
+    var c = clean(n);
+    if (c && !seen[c.toLowerCase()]) {
+      seen[c.toLowerCase()] = true;
+      names.push(c);
+    }
+  });
+  return names;
+}
+
+// Fits the product names into the space between the project number and the location.
+// Fewer names print bigger; very long lists end with "+ N more".
+function buildItemsBlock(names) {
+  var top = 290, bottom = 760, width = 760;
+  var space = bottom - top;
+  var sizes = [60, 48, 40, 34, 28];
+  var size = sizes[sizes.length - 1];
+  for (var i = 0; i < sizes.length; i++) {
+    if (Math.floor(space / (sizes[i] + 10)) >= names.length) { size = sizes[i]; break; }
+  }
+  var maxLines = Math.floor(space / (size + 10));
+  var maxChars = Math.floor(width / (size * 0.55));
+
+  var lines = names.map(function (n) { return shorten("- " + n, maxChars); });
+  if (lines.length > maxLines) {
+    var extra = lines.length - (maxLines - 1);
+    lines = lines.slice(0, maxLines - 1);
+    lines.push("+ " + extra + " more");
+  }
+  if (lines.length === 0) lines = ["(no items listed)"];
+
+  return "^FO20," + top + "^A0N," + size + "," + size +
+         "^FB" + width + "," + maxLines + ",10,L,0^FD" + lines.join("\\&") + "^FS\n";
+}
+
 function buildZPL() {
-  var boxId = getParam("boxid");
-  var desc = getParam("desc").substring(0, 40);
-  var pm = getParam("pm");
-  var project = getParam("project");
-  var loc = getParam("loc");
+  var boxId = clean(getParam("boxid"));
+  var pm = shorten(clean(getParam("pm")) || "No PM", 16);
+  var project = clean(getParam("project"));
+  var loc = clean(getParam("loc")) || "Not assigned";
+  var names = getItemNames();
 
   return "^XA\n" +
     "^CI28\n" +
     "^PW812\n" +
     "^LL1218\n" +
-    "^FO20,40^A0N,100,100^FD" + boxId + "^FS\n" +
-    "^FO20,170^GB760,4,4^FS\n" +
-    "^FO20,210^A0N,65,65^FB760,2,10,L,0^FD" + desc + "^FS\n" +
-    "^FO20,390^A0N,80,80^FD" + pm + "^FS\n" +
-    "^FO20,480^A0N,30,30^FDProject: " + project + "^FS\n" +
-    "^FO20,550^GB760,3,3^FS\n" +
-    "^FO20,590^A0N,26,26^FDLOCATION^FS\n" +
-    "^FO20,630^A0N,65,65^FD" + loc + "^FS\n" +
-    "^FO20,760^GB760,3,3^FS\n" +
-    "^FO20,800^A0N,26,26^FDNOTES^FS\n" +
+    // PM name, largest, at the top
+    "^FO20,30^A0N,100,100^FB772,1,0,L,0^FD" + pm + "^FS\n" +
+    // Project number
+    "^FO20,145^A0N,55,55^FDProject " + (project || "none") + "^FS\n" +
+    "^FO20,220^GB760,4,4^FS\n" +
+    // Product names
+    "^FO20,240^A0N,26,26^FDITEMS^FS\n" +
+    buildItemsBlock(names) +
+    "^FO20,775^GB760,3,3^FS\n" +
+    // Location
+    "^FO20,795^A0N,26,26^FDLOCATION^FS\n" +
+    "^FO20,830^A0N,70,70^FD" + loc + "^FS\n" +
+    // Box ID, small
+    "^FO20,935^A0N,34,34^FDBox " + boxId + "^FS\n" +
+    // Barcode at the bottom
     "^FO238,1000^BY3^BCN,170,N,N,N^FD" + boxId + "^FS\n" +
     "^XZ\n";
 }
